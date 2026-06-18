@@ -1,0 +1,27 @@
+const API = window.FITCOACH_API_BASE || 'http://localhost:10000';
+let token = localStorage.getItem('fitcoach_token') || '';
+const $ = id => document.getElementById(id);
+function authHeaders(){ return token ? { Authorization:`Bearer ${token}` } : {}; }
+async function api(path, options={}){
+  const isForm = options.body instanceof FormData;
+  const res = await fetch(`${API}${path}`, { ...options, headers:{ ...(isForm?{}:{'Content-Type':'application/json'}), ...authHeaders(), ...(options.headers||{}) } });
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+function showAuthed(){ $('authView').classList.toggle('hidden', !!token); $('appView').classList.toggle('hidden', !token); $('logoutBtn').classList.toggle('hidden', !token); if(token) refreshDashboard(); }
+function setMsg(id,msg){ $(id).textContent=msg; }
+async function register(){ try{ const d=await api('/api/auth/register',{method:'POST',body:JSON.stringify({name:$('name').value,email:$('email').value,password:$('password').value})}); token=d.token; localStorage.setItem('fitcoach_token',token); showAuthed(); }catch(e){setMsg('authMsg',e.message)} }
+async function login(){ try{ const d=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email:$('email').value,password:$('password').value})}); token=d.token; localStorage.setItem('fitcoach_token',token); showAuthed(); }catch(e){setMsg('authMsg',e.message)} }
+function logout(){ token=''; localStorage.removeItem('fitcoach_token'); showAuthed(); }
+async function saveProfile(){ try{ const body={ sex:$('sex').value, age:+$('age').value, height_cm:+$('height').value, current_weight_lb:+$('currentWeight').value, goal_weight_lb:+$('goalWeight').value, activity_level:$('activity').value, pace:$('pace').value, dietary_preferences:$('prefs').value, struggle_notes:$('prefs').value }; const d=await api('/api/profile',{method:'PUT',body:JSON.stringify(body)}); setMsg('profileMsg',`Saved. Target: ${d.profile.daily_calorie_target} calories/day, protein: ${d.profile.protein_target_g}g.`); refreshDashboard(); }catch(e){setMsg('profileMsg',e.message)} }
+async function refreshDashboard(){ try{ const d=await api('/api/dashboard'); const t=d.today||{}; $('caloriesNow').textContent=t.calories||0; $('caloriesLeft').textContent=t.remaining_calories ?? '—'; $('proteinNow').textContent=`${Math.round(t.protein_g||0)}g`; const target=t.target_calories||1; $('calProgress').value=Math.min(100, Math.round((Number(t.calories||0)/target)*100)); $('mealList').innerHTML=(d.recentMeals||[]).map(m=>`<div class="item"><b>${m.title}</b> — ${m.calories} cal<br><small>${m.meal_type} • ${new Date(m.eaten_at).toLocaleString()}</small></div>`).join('') || '<p>No meals yet.</p>'; $('weightList').innerHTML=(d.weights||[]).slice(0,6).map(w=>`<div class="item"><b>${w.weight_lb} lb</b><br><small>${new Date(w.logged_at).toLocaleDateString()}</small></div>`).join('') || '<p>No weights yet.</p>'; }catch(e){ console.warn(e); } }
+async function addMeal(){ try{ const body={ meal_type:$('mealType').value, title:$('mealTitle').value, calories:+$('mealCalories').value, protein_g:+($('mealProtein').value||0), carbs_g:+($('mealCarbs').value||0), fat_g:+($('mealFat').value||0), fiber_g:0 }; await api('/api/meals',{method:'POST',body:JSON.stringify(body)}); setMsg('mealMsg','Meal saved.'); refreshDashboard(); }catch(e){setMsg('mealMsg',e.message)} }
+async function analyzePhoto(){ try{ const file=$('photoInput').files[0]; if(!file) throw new Error('Choose a photo first.'); $('photoResult').textContent='Analyzing...'; const fd=new FormData(); fd.append('photo',file); const d=await api('/api/meals/photo',{method:'POST',body:fd}); $('photoResult').textContent=JSON.stringify(d.estimate,null,2); refreshDashboard(); }catch(e){$('photoResult').textContent=e.message;} }
+async function saveWeight(){ try{ await api('/api/weights',{method:'POST',body:JSON.stringify({weight_lb:+$('weightInput').value,note:$('weightNote').value})}); setMsg('weightMsg','Weight saved.'); refreshDashboard(); }catch(e){setMsg('weightMsg',e.message)} }
+function appendBubble(role,text){ const div=document.createElement('div'); div.className=`bubble ${role}`; div.textContent=text; $('chatBox').appendChild(div); $('chatBox').scrollTop=$('chatBox').scrollHeight; }
+async function sendCoach(){ const msg=$('coachMsg').value.trim(); if(!msg) return; appendBubble('user',msg); $('coachMsg').value=''; try{ const d=await api('/api/coach/chat',{method:'POST',body:JSON.stringify({message:msg})}); appendBubble('assistant',d.reply); }catch(e){appendBubble('assistant',e.message)} }
+document.querySelectorAll('.tabs button').forEach(btn=>btn.addEventListener('click',()=>{ document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); document.querySelectorAll('.tab').forEach(s=>s.classList.add('hidden')); $(btn.dataset.tab).classList.remove('hidden'); if(btn.dataset.tab==='dashboard') refreshDashboard(); }));
+$('registerBtn').onclick=register; $('loginBtn').onclick=login; $('logoutBtn').onclick=logout; $('saveProfileBtn').onclick=saveProfile; $('addMealBtn').onclick=addMeal; $('analyzeBtn').onclick=analyzePhoto; $('saveWeightBtn').onclick=saveWeight; $('sendCoachBtn').onclick=sendCoach;
+if('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
+showAuthed();

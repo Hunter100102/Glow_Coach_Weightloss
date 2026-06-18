@@ -1,0 +1,12 @@
+import express from 'express';
+import { z } from 'zod';
+import { query } from '../db/pool.js';
+import { requireAuth } from '../middleware/auth.js';
+import { coachReply } from '../services/ai.js';
+import { buildDashboard } from './dashboard.js';
+const router=express.Router(); router.use(requireAuth);
+const schema=z.object({message:z.string().min(1).max(3000)});
+router.post('/chat', async(req,res,next)=>{ try{ const {message}=schema.parse(req.body); await query('INSERT INTO chat_messages(user_id,role,content) VALUES($1,$2,$3)',[req.user.id,'user',message]); const dashboard=await buildDashboard(req.user.id); const memories=(await query('SELECT memory FROM coach_memories WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20',[req.user.id])).rows.map(r=>r.memory); const reply=await coachReply({profile:dashboard.profile,dashboard:dashboard.today,recentMeals:dashboard.recentMeals,memories,message}); await query('INSERT INTO chat_messages(user_id,role,content) VALUES($1,$2,$3)',[req.user.id,'assistant',reply]); res.json({reply}); }catch(e){next(e);} });
+router.get('/history', async(req,res,next)=>{ try{ const r=await query('SELECT role,content,created_at FROM chat_messages WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50',[req.user.id]); res.json({messages:r.rows.reverse()}); }catch(e){next(e);} });
+router.post('/memories', async(req,res,next)=>{ try{ const memory=z.object({memory:z.string().min(2).max(500)}).parse(req.body).memory; const r=await query('INSERT INTO coach_memories(user_id,memory) VALUES($1,$2) RETURNING *',[req.user.id,memory]); res.status(201).json({memory:r.rows[0]}); }catch(e){next(e);} });
+export default router;
